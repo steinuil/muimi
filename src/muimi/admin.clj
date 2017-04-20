@@ -1,7 +1,8 @@
 (ns muimi.admin
+  (:use [muimi.config])
   (:require [clojure.java.jdbc :as jdbc]))
 
-(defn init [db-spec]
+(defn init []
   (let [db-conn (jdbc/get-connection db-spec)]
     (jdbc/with-db-connection [db-conn db-spec]
       (jdbc/db-do-commands db-spec
@@ -17,6 +18,7 @@
            [[:id       :BIGINT       "IDENTITY"]
             [:thread   :BIGINT       "NOT NULL"]
             [:name     "VARCHAR(40)" "NOT NULL" "CHECK (TRIM(name) IS NOT NULL)"]
+            [:date     :TIMESTAMP    "DEFAULT (CURRENT_TIMESTAMP())"]
             [:body     :TEXT         "DEFAULT ''"]
             [:spoiler  :BOOLEAN      "DEFAULT FALSE"]
             ["FOREIGN KEY (thread) REFERENCES lounge_threads(id)" "ON DELETE CASCADE"]])
@@ -29,6 +31,7 @@
             [:width :INTEGER] [:height :INTEGER]
             ["FOREIGN KEY (post) REFERENCES lounge_posts(id)" "ON DELETE SET NULL"]])
 
+         ; Trigger file deletion when the row is deleted from the database.
          "DROP TRIGGER IF EXISTS delete_files"
 
          (str "CREATE TRIGGER delete_files "

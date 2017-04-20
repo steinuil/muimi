@@ -1,12 +1,11 @@
 (ns muimi.core
   (:gen-class :main true)
-  (:use [muimi.views])
+  (:use [muimi.config]
+        [muimi.views])
   (:require [org.httpkit.server :as http-kit]
             [clojure.core.match :refer [match]]
             [clojure.string :as string]
             [clojure.java.jdbc :as jdbc]))
-
-(def db-spec {:dbtype "h2" :dbname "./muimi"})
 
 (defn redirect
   ([url]
@@ -15,8 +14,29 @@
    (let [status (case t :permanent 308 :temporary 307 :see-other 303 302)]
      {:status status :headers {"Location" url} :body ""})))
 
+
+(defn- clob-to-string [clob]
+  (with-open [rdr (java.io.BufferedReader. (.getCharacterStream clob))]
+    (apply str (line-seq rdr))))
+
+
+(defn- lounge-index-previews [thread-id]
+  (jdbc/query db-spec
+    ["(SELECT TOP 1 * FROM lounge_posts WHERE thread = ? ORDER BY id) UNION
+      (SELECT TOP ? * FROM lounge_posts WHERE thread = ? ORDER BY -id) ORDER BY ID"
+     thread-id post-previews thread-id]
+    {:row-fn #(assoc % :body (clob-to-string (:body %)))}))
+
+
+(defn lounge-index []
+  (->> (jdbc/query db-spec ["SELECT * FROM lounge_threads"])
+       (map #(->>
+               (:id %)
+               (lounge-index-previews)
+               (assoc % :posts)
+               (lounge-thread)))))
+
 (defn app [request]
-  ;(println (-> request :headers (get "referer")))
   (let [path (-> (:uri request) (subs 1) (string/split #"/" -1))
         method (:request-method request)]
 
@@ -37,16 +57,13 @@
       (redirect "/newsroom" :see-other)
 
       [:get ["lounge" ""]]
-      (page "More classic random board.")
+      (page (cons [:h2 "More classic random board."] (lounge-index)))
 
       [:post ["lounge" ""]]
       (redirect "/lounge/" :see-other)
 
       [:get ["lounge"]]
       (redirect "/lounge/")
-
-      [:get ["lounge" "all"]]
-      (page "All threads, textboard-style.")
 
       [:get ["lounge" thread-id]]
       (page (str "All replies in " thread-id ".")) ; 429 too many requests
@@ -55,10 +72,7 @@
       (redirect (str "/lounge/" thread-id) :see-other)
 
       [:get ["test"]]
-      (page (jdbc/query db-spec ["SELECT ROWNUM() AS ROW, * FROM ayy WHERE lmao = 'oi' ORDER BY -1"]))
-
-      [:get ["test" ""]]
-      (page (jdbc/query db-spec ["SHOW COLUMNS FROM files"]))
+      (page "test")
 
       [:post _]    {:status 405 :headers {} :body ""}
       [:delete _]  {:status 405 :headers {} :body ""}
@@ -70,12 +84,3 @@
   (let [port 8080]
     (println (str "Serving muimi on port " port))
     (http-kit/run-server app {:port port})))
-
-
-(defonce server (atom nil))
-
-(defn reload []
-  (when @server (@server))
-  (use 'muimi.core :reload)
-  (reset! server (-main))
-  nil)
